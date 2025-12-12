@@ -479,14 +479,27 @@ class Program
             return false;
         }
 
+        // ★ 항상 강화 예외 먼저 검사
+        if (IsAlwaysReinforceWeapon(itemName))
+        {
+            Console.WriteLine($"[DEBUG] 항상 강화 대상 무기 감지 → \"{itemName}\" 는 판매하지 않음");
+            return false;   // false = 강화
+        }
+
         bool isMainWeapon = IsMainWeapon(itemName);
 
         Console.WriteLine($"[DEBUG] 레벨={level}, 아이템=\"{itemName}\", 무기여부={isMainWeapon}");
 
         if (isMainWeapon)
+        {
+            // 검/몽둥이는 1강 이상이면 판매
             return level >= 1;
+        }
         else
+        {
+            // 나머지 아이템은 11강부터 판매
             return level >= 11;
+        }
     }
 
     // ====== 도전 모드 목표 달성 ======
@@ -527,6 +540,19 @@ class Program
 
         // 혹시 다른 패턴도 쓰고 싶으면 아래에 추가하면 됨
         // if (flat.Contains("필요골드") && flat.Contains("남은골드")) ...
+
+        return false;
+    }
+    static bool IsAlwaysReinforceWeapon(string itemName)
+    {
+        if (string.IsNullOrWhiteSpace(itemName))
+            return false;
+
+        string flat = Regex.Replace(itemName, @"\s+", "");
+
+        // 이름에 '광선검' 또는 '단검'이 포함되면 항상 강화
+        if (flat.Contains("광선검") || flat.Contains("단검"))
+            return true;
 
         return false;
     }
