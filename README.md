@@ -38,7 +38,7 @@ OCR의 정확도를 위해 **채팅 말풍선이 자주 뜨는 위치를 최대 
 캡쳐 설정이 끝나면 카카오톡 입력창을 클릭하세요.  
 **그 순간부터 강화/판매 명령이 자동 실행됩니다.**
 
-<img width="567" height="1053" alt="image" src="httpsgithub.com/user-attachments/assets/b7d45005-8bae-4f20-92ac-40a282dc32bd" />
+<img width="571" height="1053" alt="image" src="https://github.com/user-attachments/assets/36befeb3-1e40-496a-8415-bdc2c8d3bd79" />
 
 ---
 
