@@ -8,10 +8,17 @@ using System.Windows.Forms;
 using Tesseract;
 using System.Media;
 
+
 class Program
 {
     // ====== 설정 ======
     static Rectangle _chatArea;
+
+    static Rectangle[] _chatAreas = new Rectangle[3];
+    static int _chatAreaCount = 0;      // 실제로 몇 개를 받았는지
+    static int _currentAreaIndex = 0;   // 지금 몇 번 박스를 쓰는 중인지
+
+    SoundPlayer player = new SoundPlayer("finish.wav");
 
     const string ReinforceText = "@플레이봇 강화";
     const string SellText = "@플레이봇 판매";
@@ -49,12 +56,25 @@ class Program
         SsalMuk,
         Challenge20
     }
+    static void PlayFinishSound()
+    {
+        try
+        {
+            string soundPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "sounds", "wow jirino~.wav");
 
+            SoundPlayer player = new SoundPlayer(soundPath);
+            player.PlaySync();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[ERROR] 효과음 재생 실패: {ex.Message}");
+        }
+    }
     // ====== Main ======
     [STAThread]
     static void Main(string[] args)
     {
-        // ★ DPI 스케일링 무효화 (좌표 = 실제 픽셀 좌표로 맞춤)
+
         SetProcessDPIAware();
 
         Console.OutputEncoding = System.Text.Encoding.UTF8;
@@ -79,7 +99,14 @@ class Program
         Thread.Sleep(800);
 
         Console.WriteLine("\n카카오톡 대화 캡쳐 영역을 잡자.\n");
-        CalibrateChatArea();
+        CalibrateChatAreas();
+        for (int i = 0; i < _chatAreaCount; i++)
+        {
+            var r = _chatAreas[i];
+            Console.WriteLine($"캡쳐 박스 {i + 1}: X={r.X}, Y={r.Y}, W={r.Width}, H={r.Height}");
+        }
+        Console.WriteLine("ESC 누르면 즉시 종료됨.");
+        Console.WriteLine();
 
         Console.WriteLine();
         Console.WriteLine($"캡쳐 영역: X={_chatArea.X}, Y={_chatArea.Y}, W={_chatArea.Width}, H={_chatArea.Height}");
@@ -143,7 +170,8 @@ class Program
                 {
                     bool withDelay = (attempt == 0);
 
-                    using (Bitmap bmp = CaptureRegion(_chatArea, withDelay))
+                    Rectangle region = _chatAreas[_currentAreaIndex];
+                    using (Bitmap bmp = CaptureRegion(region, withDelay))
                     {
                         string rawText = OcrBitmap(bmp, engine, out float conf);
 
@@ -178,40 +206,26 @@ class Program
                         {
                             Console.WriteLine("[INFO] 인식이 애매함 → 재캡쳐 시도");
                             if (attempt == 0)
+                            {
+                                // 같은 박스에서 한 번 더
                                 continue;
+                            }
                             else
                             {
                                 Console.WriteLine("[WARN] 두 번 모두 인식 불확실 → 이번 턴은 명령어 전송 안 함");
                                 handledThisTurn = true;
 
-                                // === 캡처 위치 자동 미세 조정 ===
                                 recaptureFailCount++;
 
                                 if (recaptureFailCount >= 2)
                                 {
-                                    SystemSounds.Exclamation.Play();
-
-                                    //// 캡처 범위 1픽셀 이동
-                                    //_chatArea.X += captureOffsetDir * 1;
-
-                                    //Console.WriteLine($"[INFO] 캡쳐 위치 이동: X={_chatArea.X} (dir={captureOffsetDir})");
-
-                                    //// 방향 반전 처리
-                                    //captureOffsetDir *= -2;
-
-                                    //캡쳐범위 다시
-                                    CalibrateChatArea();
-                                    Console.WriteLine();
-                                    Console.WriteLine($"새 캡쳐 영역: X={_chatArea.X}, Y={_chatArea.Y}, W={_chatArea.Width}, H={_chatArea.Height}");
-
-                                    // 실패 카운트 초기화
+                                    // 다음 박스로 로테이션
+                                    _currentAreaIndex = (_currentAreaIndex + 1) % _chatAreaCount;
+                                    Console.WriteLine($"[INFO] 캡쳐 박스를 변경합니다 → #{_currentAreaIndex + 1}");
+                                    //SystemSounds.Exclamation.Play();
                                     recaptureFailCount = 0;
-                                    //using (Bitmap test = CaptureRegion(_chatArea, withDelay: false))
-                                    //{
-                                    //    test.Save("debug_capture.png", System.Drawing.Imaging.ImageFormat.Png);
-                                    //    Console.WriteLine("debug_capture.png 로 캡쳐 저장됨");
-                                    //}
                                 }
+
                                 break;
                             }
                         }
@@ -233,6 +247,16 @@ class Program
                             if (reached)
                             {
                                 Console.WriteLine($"[MODE] 도전모드 → {targetLevelChallenge}강 찍힘! 자동 종료.");
+                                // 효과음 재생
+                                try
+                                {
+                                    PlayFinishSound();
+                                }
+                                catch (Exception ex)
+                                {
+                                    Console.WriteLine($"[ERROR] 효과음 재생 실패: {ex.Message}");
+                                }
+
                                 exitProgram = true;
                                 handledThisTurn = true;
                                 break;
@@ -290,34 +314,56 @@ class Program
         }
 
         // ====== 캘리브레이션 (드래그로 선택) ======
-        static void CalibrateChatArea()
+        static void CalibrateChatAreas()
         {
             Console.WriteLine("===== 캡쳐 영역 설정 =====");
-            Console.WriteLine("마우스로 화면을 드래그해서 '채팅봇 말풍선'을 감싸서 선택하세요.");
-            Console.WriteLine("선택 중 ESC를 누르면 취소됩니다.\n");
+            Console.WriteLine("최대 3개의 캡쳐 영역을 순서대로 지정할 수 있습니다.");
+            Console.WriteLine("1번: 말풍선이 가장 자주 뜨는 위치");
+            Console.WriteLine("2번: (선택) 가끔 뜨는 다른 위치");
+            Console.WriteLine("3번: (선택) 예외적으로 뜨는 위치");
+            Console.WriteLine();
+            Console.WriteLine("각 박스는 마우스로 드래그해서 선택하세요.");
+            Console.WriteLine("더 이상 추가하지 않으려면 선택 창에서 ESC로 취소하면 됩니다.\n");
 
-            using (var selForm = new CaptureSelectionForm())
+            _chatAreaCount = 0;
+            _currentAreaIndex = 0;
+
+            for (int i = 0; i < 3; i++)
             {
-                var result = selForm.ShowDialog();
+                Console.WriteLine($"--- 캡쳐 박스 {i + 1} 설정 ---");
 
-                if (result == DialogResult.OK && !selForm.SelectedRectScreen.IsEmpty)
+                using (var selForm = new CaptureSelectionForm())
                 {
-                    _chatArea = selForm.SelectedRectScreen;
-                    Console.WriteLine($"선택된 캡쳐 영역: X={_chatArea.X}, Y={_chatArea.Y}, W={_chatArea.Width}, H={_chatArea.Height}");
-                }
-                else
-                {
-                    Console.WriteLine("영역 선택이 취소되었거나 잘못되었습니다. 프로그램을 종료합니다.");
-                    Thread.Sleep(1000);
-                    Environment.Exit(0);
+                    var result = selForm.ShowDialog();
+
+                    if (result == DialogResult.OK && !selForm.SelectedRectScreen.IsEmpty)
+                    {
+                        _chatAreas[_chatAreaCount] = selForm.SelectedRectScreen;
+                        _chatAreaCount++;
+
+                        Console.WriteLine($"[INFO] 박스 {i + 1}: X={selForm.SelectedRectScreen.X}, " +
+                                          $"Y={selForm.SelectedRectScreen.Y}, " +
+                                          $"W={selForm.SelectedRectScreen.Width}, " +
+                                          $"H={selForm.SelectedRectScreen.Height}");
+
+                        Console.WriteLine();
+                    }
+                    else
+                    {
+                        Console.WriteLine("[INFO] 더 이상 캡쳐 박스를 추가하지 않습니다.");
+                        break;
+                    }
                 }
             }
-            //using (Bitmap test = CaptureRegion(_chatArea, withDelay: false))
-            //{
-            //    test.Save("debug_capture.png", System.Drawing.Imaging.ImageFormat.Png);
-            //    Console.WriteLine("debug_capture.png 로 캡쳐 저장됨");
-            //    Console.ReadKey();
-            //}
+
+            if (_chatAreaCount == 0)
+            {
+                Console.WriteLine("[ERROR] 캡쳐 박스가 하나도 설정되지 않았습니다. 프로그램을 종료합니다.");
+                Thread.Sleep(1000);
+                Environment.Exit(0);
+            }
+
+            Console.WriteLine($"[INFO] 총 {_chatAreaCount}개의 캡쳐 박스를 사용합니다.");
         }
 
         // ====== 캡쳐 + OCR ======
@@ -353,48 +399,77 @@ class Program
 
         static string OcrBitmap(Bitmap bmp, TesseractEngine engine, out float confidence)
         {
-            //using (var processed = new Bitmap(bmp.Width, bmp.Height))
-            //{
-            //    for (int y = 0; y < bmp.Height; y++)
-            //    {
-            //        for (int x = 0; x < bmp.Width; x++)
-            //        {
-            //            Color c = bmp.GetPixel(x, y);
-            //            int luminance = (int)(c.R * 0.299 + c.G * 0.587 + c.B * 0.114);
-            //            int v = luminance < 160 ? 0 : 255;
-            //            processed.SetPixel(x, y, Color.FromArgb(v, v, v));
-            //        }
-            //    }
+            // 1) 원본으로 먼저 시도
+            string textOrig;
+            float confOrig;
 
-            //    using (var ms = new MemoryStream())
-            //    {
-            //        processed.Save(ms, System.Drawing.Imaging.ImageFormat.Png);
-            //        byte[] data = ms.ToArray();
-
-            //        using (var pix = Pix.LoadFromMemory(data))
-            //        using (var page = engine.Process(pix))
-            //        {
-            //            string text = page.GetText();
-            //            confidence = page.GetMeanConfidence() * 100;
-            //            return text;
-            //        }
-            //    }
-            //}
             using (var ms = new MemoryStream())
             {
                 bmp.Save(ms, System.Drawing.Imaging.ImageFormat.Png);
                 ms.Position = 0;
 
                 using (var pix = Pix.LoadFromMemory(ms.ToArray()))
-                using (var page = engine.Process(pix))
+                using (var page = engine.Process(pix, PageSegMode.SingleBlock))
                 {
-                    string text = page.GetText();
-                    confidence = page.GetMeanConfidence() * 100;
-                    return text;
+                    textOrig = page.GetText();
+                    confOrig = page.GetMeanConfidence() * 100;
                 }
             }
-        }
 
+            // 원본 신뢰도가 충분히 높으면 그대로 사용
+            if (confOrig >= 80f)
+            {
+                confidence = confOrig;
+                return textOrig;
+            }
+
+            // 2) 신뢰도가 낮으면 흑백 이분화해서 한 번 더 시도
+            string textBin;
+            float confBin;
+
+            using (Bitmap bin = MakeBinary(bmp))
+            using (var ms2 = new MemoryStream())
+            {
+                bin.Save(ms2, System.Drawing.Imaging.ImageFormat.Png);
+                ms2.Position = 0;
+
+                using (var pix2 = Pix.LoadFromMemory(ms2.ToArray()))
+                using (var page2 = engine.Process(pix2, PageSegMode.SingleBlock))
+                {
+                    textBin = page2.GetText();
+                    confBin = page2.GetMeanConfidence() * 100;
+                }
+            }
+
+            // 3) 둘 중 신뢰도 높은 쪽 채택
+            if (confBin > confOrig)
+            {
+                confidence = confBin;
+                return textBin;
+            }
+            else
+            {
+                confidence = confOrig;
+                return textOrig;
+            }
+        }
+        static Bitmap MakeBinary(Bitmap src)
+        {
+            Bitmap dst = new Bitmap(src.Width, src.Height);
+            for (int y = 0; y < src.Height; y++)
+            {
+                for (int x = 0; x < src.Width; x++)
+                {
+                    Color c = src.GetPixel(x, y);
+                    int luminance = (int)(c.R * 0.299 + c.G * 0.587 + c.B * 0.114);
+
+                    // 임계값은 직접 조금씩 바꿔보면서 튜닝 (150~180 근처)
+                    int v = luminance < 160 ? 0 : 255;
+                    dst.SetPixel(x, y, Color.FromArgb(v, v, v));
+                }
+            }
+            return dst;
+        }
         // ====== 문자열 전처리 ======
         static string NormalizeDigits(string s)
         {
