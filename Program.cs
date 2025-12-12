@@ -6,6 +6,7 @@ using System.Text.RegularExpressions;
 using System.Threading;
 using System.Windows.Forms;
 using Tesseract;
+using System.Media;
 
 class Program
 {
@@ -15,7 +16,11 @@ class Program
     const string ReinforceText = "@플레이봇 강화";
     const string SellText = "@플레이봇 판매";
 
-    const int TargetLevel = 20;
+    //const int TargetLevel = 20;
+
+    static int targetLevelSsalMuk = 15;   // 쌀먹 모드 기본값 (아무 의미 없음, 사용자 입력으로 바뀜)
+    static int targetLevelChallenge = 20; // 도전 모드 기본값
+
 
     [DllImport("user32.dll")]
     static extern bool GetCursorPos(out POINT lpPoint);
@@ -52,6 +57,21 @@ class Program
         Console.OutputEncoding = System.Text.Encoding.UTF8;
 
         RunMode mode = SelectRunMode();
+        if (mode == RunMode.SsalMuk)
+        {
+            Console.Write("쌀먹 모드의 최대 강화 목표 레벨을 입력하세요 (예: 11): ");
+            if (int.TryParse(Console.ReadLine(), out int lvl))
+                targetLevelSsalMuk = lvl;
+            Console.WriteLine($"[INFO] 쌀먹 모드 최대 강화 레벨 = {targetLevelSsalMuk}");
+        }
+        else // Challenge20 모드
+        {
+            Console.Write("도전 모드의 목표 강화 레벨을 입력하세요 (예: 20): ");
+            if (int.TryParse(Console.ReadLine(), out int lvl))
+                targetLevelChallenge = lvl;
+            Console.WriteLine($"[INFO] 도전 모드 목표 강화 레벨 = {targetLevelChallenge}");
+        }
+        Thread.Sleep(800);
         Console.WriteLine($"\n[INFO] 선택한 모드: {mode}");
         Thread.Sleep(800);
 
@@ -138,6 +158,8 @@ class Program
 
                                 if (recaptureFailCount >= 2)
                                 {
+                                    SystemSounds.Exclamation.Play();
+
                                     //// 캡처 범위 1픽셀 이동
                                     //_chatArea.X += captureOffsetDir * 1;
 
@@ -145,7 +167,12 @@ class Program
 
                                     //// 방향 반전 처리
                                     //captureOffsetDir *= -2;
-
+                                    
+                                    //캡쳐범위 다시
+                                    CalibrateChatArea();
+                                    Console.WriteLine();
+                                    Console.WriteLine($"새 캡쳐 영역: X={_chatArea.X}, Y={_chatArea.Y}, W={_chatArea.Width}, H={_chatArea.Height}");
+                                    
                                     // 실패 카운트 초기화
                                     recaptureFailCount = 0;
                                     //using (Bitmap test = CaptureRegion(_chatArea, withDelay: false))
@@ -174,13 +201,13 @@ class Program
 
                             if (reached)
                             {
-                                Console.WriteLine($"[MODE] 도전모드 → {TargetLevel}강 찍힘! 자동 종료.");
+                                Console.WriteLine($"[MODE] 도전모드 → {targetLevelChallenge}강 찍힘! 자동 종료.");
                                 exitProgram = true;
                                 handledThisTurn = true;
                                 break;
                             }
 
-                            Console.WriteLine($"[MODE] 도전모드 → 아직 {TargetLevel}강 미달. 강화 계속 감.");
+                            Console.WriteLine($"[MODE] 도전모드 → 아직 {targetLevelChallenge}강 미달. 강화 계속 감.");
                             Console.WriteLine($"입력할 문구: {ReinforceText}");
                             SendChatLikeHuman(ReinforceText);
                         }
@@ -479,7 +506,7 @@ class Program
             return false;
         }
 
-        // ★ 항상 강화 예외 먼저 검사
+        // 항상 강화 예외 먼저 검사
         if (IsAlwaysReinforceWeapon(itemName))
         {
             Console.WriteLine($"[DEBUG] 항상 강화 대상 무기 감지 → \"{itemName}\" 는 판매하지 않음");
@@ -492,13 +519,11 @@ class Program
 
         if (isMainWeapon)
         {
-            // 검/몽둥이는 1강 이상이면 판매
-            return level >= 1;
+            return level >= targetLevelSsalMuk;
         }
         else
         {
-            // 나머지 아이템은 11강부터 판매
-            return level >= 11;
+            return level >= targetLevelSsalMuk;
         }
     }
 
@@ -518,7 +543,7 @@ class Program
         }
 
         Console.WriteLine($"[DEBUG] 현재 레벨 = {level}, 아이템 = \"{itemName}\"");
-        return level >= TargetLevel;
+        return level >= targetLevelChallenge;
     }
 
     // ====== 카톡 입력 ======
