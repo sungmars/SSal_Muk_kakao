@@ -5,8 +5,13 @@
     <TargetFramework>net8.0-windows</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWindowsForms>true</UseWindowsForms>  
-    <Nullable>enable</Nullable>
+    <Nullable>enable</Nullable>  
+    <!--<ApplicationManifest>app.manifest</ApplicationManifest>-->
   </PropertyGroup>
+
+  <ItemGroup>
+    <AdditionalFiles Remove="app.manifest" />
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="System.Drawing.Common" Version="10.0.1" />

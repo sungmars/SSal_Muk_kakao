@@ -10,22 +10,21 @@ using Tesseract;
 class Program
 {
     // ====== 설정 ======
-    // 캡쳐할 카톡 대화 영역 저장용
     static Rectangle _chatArea;
 
-    // 자동으로 입력될 명령어
     const string ReinforceText = "@플레이봇 강화";
     const string SellText = "@플레이봇 판매";
 
-    // 20강 도전 모드 목표 강화 단계
     const int TargetLevel = 20;
 
     [DllImport("user32.dll")]
     static extern bool GetCursorPos(out POINT lpPoint);
 
+    [DllImport("user32.dll")]
+    static extern bool SetProcessDPIAware();   // ★ DPI 인식용
+
     struct POINT { public int X; public int Y; }
 
-    // OCR로 나온 결과가 뭔지 구분하는 용도
     enum ReinforceResult
     {
         Unknown,
@@ -34,20 +33,21 @@ class Program
         Keep
     }
 
-    // 프로그램이 동작할 모드
     enum RunMode
     {
-        SsalMuk,      // 쌀먹 모드 (무기 종류 보고 판매/강화 결정)
-        Challenge20   // 목표 레벨까지 무조건 강화
+        SsalMuk,
+        Challenge20
     }
 
     // ====== Main ======
     [STAThread]
     static void Main(string[] args)
     {
+        // ★ DPI 스케일링 무효화 (좌표 = 실제 픽셀 좌표로 맞춤)
+        SetProcessDPIAware();
+
         Console.OutputEncoding = System.Text.Encoding.UTF8;
 
-        // 프로그램 시작하자마자 모드 먼저 선택하게 한다
         RunMode mode = SelectRunMode();
         Console.WriteLine($"\n[INFO] 선택한 모드: {mode}");
         Thread.Sleep(800);
@@ -60,7 +60,6 @@ class Program
         Console.WriteLine("ESC 누르면 즉시 종료됨.");
         Console.WriteLine();
 
-        // tessdata 위치 찾기 (OCR 구동하려면 필수)
         string baseDir = AppDomain.CurrentDomain.BaseDirectory;
         string tessDataPath = Path.Combine(baseDir, "tessdata");
 
@@ -74,61 +73,88 @@ class Program
 
         using (var engine = new TesseractEngine(tessDataPath, "kor+eng", EngineMode.Default))
         {
-            while (true)
+            bool exitProgram = false;
+
+            while (!exitProgram)
             {
-                // ESC 눌렀으면 바로 종료
                 if (Console.KeyAvailable && Console.ReadKey(true).Key == ConsoleKey.Escape)
                 {
                     Console.WriteLine("ESC 입력 → 종료.");
                     break;
                 }
 
-                using (Bitmap bmp = CaptureRegion(_chatArea))
+                bool handledThisTurn = false;
+
+                for (int attempt = 0; attempt < 2; attempt++)
                 {
-                    // OCR 돌려서 현재 카톡 상태 읽어옴
-                    string rawText = OcrBitmap(bmp, engine, out float conf);
+                    bool withDelay = (attempt == 0);
 
-                    Console.Clear();
-                    Console.WriteLine("===== OCR 원본 =====");
-                    Console.WriteLine(rawText);
-                    Console.WriteLine("====================");
-                    Console.WriteLine($"신뢰도: {conf:F1}%\n");
-
-                    if (mode == RunMode.SsalMuk)
+                    using (Bitmap bmp = CaptureRegion(_chatArea, withDelay))
                     {
-                        // 쌀먹 모드 → 아이템 종류 기반으로 판매/강화 판단
-                        bool shouldSell = DecideBasedOnWholeText(rawText);
-                        string sendText = shouldSell ? SellText : ReinforceText;
+                        string rawText = OcrBitmap(bmp, engine, out float conf);
 
-                        Console.WriteLine($"[MODE] 쌀먹 → {(shouldSell ? "판매" : "강화")}");
-                        Console.WriteLine($"입력할 문구: {sendText}");
-                        SendChatLikeHuman(sendText);
-                    }
-                    else // 도전 모드
-                    {
-                        // 목표 레벨 찍었는지 확인
-                        bool reached = IsTargetLevelReached(rawText);
+                        Console.Clear();
+                        Console.WriteLine("===== OCR 원본 =====");
+                        Console.WriteLine(rawText);
+                        Console.WriteLine("====================");
+                        Console.WriteLine($"신뢰도: {conf:F1}% (시도 {attempt + 1}/2)\n");
 
-                        if (reached)
+                        if (IsAmbiguous(rawText, conf, mode))
                         {
-                            Console.WriteLine($"[MODE] 도전모드 → {TargetLevel}강 찍힘! 자동 종료.");
-                            break;
+                            Console.WriteLine("[INFO] 인식이 애매함 → 재캡쳐 시도");
+                            if (attempt == 0)
+                                continue;
+                            else
+                            {
+                                Console.WriteLine("[WARN] 두 번 모두 인식 불확실 → 이번 턴은 명령어 전송 안 함");
+                                handledThisTurn = true;
+                                break;
+                            }
                         }
 
-                        Console.WriteLine($"[MODE] 도전모드 → 아직 {TargetLevel}강 미달. 강화 계속 감.");
-                        Console.WriteLine($"입력할 문구: {ReinforceText}");
-                        SendChatLikeHuman(ReinforceText);
+                        // 애매하지 않은 경우 → 기존 로직
+                        if (mode == RunMode.SsalMuk)
+                        {
+                            bool shouldSell = DecideBasedOnWholeText(rawText);
+                            string sendText = shouldSell ? SellText : ReinforceText;
+
+                            Console.WriteLine($"[MODE] 쌀먹 → {(shouldSell ? "판매" : "강화")}");
+                            Console.WriteLine($"입력할 문구: {sendText}");
+                            SendChatLikeHuman(sendText);
+                        }
+                        else // Challenge20
+                        {
+                            bool reached = IsTargetLevelReached(rawText);
+
+                            if (reached)
+                            {
+                                Console.WriteLine($"[MODE] 도전모드 → {TargetLevel}강 찍힘! 자동 종료.");
+                                exitProgram = true;
+                                handledThisTurn = true;
+                                break;
+                            }
+
+                            Console.WriteLine($"[MODE] 도전모드 → 아직 {TargetLevel}강 미달. 강화 계속 감.");
+                            Console.WriteLine($"입력할 문구: {ReinforceText}");
+                            SendChatLikeHuman(ReinforceText);
+                        }
+
+                        handledThisTurn = true;
+                        break;
                     }
                 }
 
-                // 너무 빠르게 다음 루프 돌지 않게 텀 주기
+                if (exitProgram) break;
+
+                if (!handledThisTurn)
+                    Console.WriteLine("[INFO] 이번 턴은 처리하지 않음 (모든 시도 애매)");
+
                 Thread.Sleep(300);
             }
         }
     }
 
     // ====== 모드 선택 ======
-    // 여기서 사용자한테 어떤 방식으로 돌릴지 선택시키는 함수
     static RunMode SelectRunMode()
     {
         while (true)
@@ -159,63 +185,70 @@ class Program
         }
     }
 
-    // ====== 캘리브레이션 ======
-    // 마우스로 대화창 범위를 직접 찍게 함
+    // ====== 캘리브레이션 (드래그로 선택) ======
     static void CalibrateChatArea()
     {
-        POINT p1, p2;
+        Console.WriteLine("===== 캡쳐 영역 설정 =====");
+        Console.WriteLine("마우스로 화면을 드래그해서 '카톡 카드가 나오는 영역'을 감싸서 선택하세요.");
+        Console.WriteLine("선택 중 ESC를 누르면 취소됩니다.\n");
 
-        Console.WriteLine("[1단계] 화면에서 '카톡 말풍선 카드의 왼쪽 위'에 마우스 올리고 1 누르기.");
-        while (true)
+        using (var selForm = new CaptureSelectionForm())
         {
-            var key = Console.ReadKey(true);
-            if (key.KeyChar == '1')
+            var result = selForm.ShowDialog();
+
+            if (result == DialogResult.OK && !selForm.SelectedRectScreen.IsEmpty)
             {
-                GetCursorPos(out p1);
-                Console.WriteLine($"왼쪽 위 → X={p1.X}, Y={p1.Y}");
-                break;
+                _chatArea = selForm.SelectedRectScreen;
+                Console.WriteLine($"선택된 캡쳐 영역: X={_chatArea.X}, Y={_chatArea.Y}, W={_chatArea.Width}, H={_chatArea.Height}");
+            }
+            else
+            {
+                Console.WriteLine("영역 선택이 취소되었거나 잘못되었습니다. 프로그램을 종료합니다.");
+                Thread.Sleep(1000);
+                Environment.Exit(0);
             }
         }
-
-        Console.WriteLine("[2단계] 이번엔 '카톡 카드 오른쪽 아래'에 마우스 올리고 2 누르기.");
-        while (true)
+        using (Bitmap test = CaptureRegion(_chatArea, withDelay: false))
         {
-            var key = Console.ReadKey(true);
-            if (key.KeyChar == '2')
-            {
-                GetCursorPos(out p2);
-                Console.WriteLine($"오른쪽 아래 → X={p2.X}, Y={p2.Y}");
-                break;
-            }
+            test.Save("debug_capture.png", System.Drawing.Imaging.ImageFormat.Png);
+            Console.WriteLine("debug_capture.png 로 캡쳐 저장됨");
+            Console.ReadKey();
         }
-
-        // 두 점 기준으로 정확한 캡쳐 영역 계산
-        int x = Math.Min(p1.X, p2.X);
-        int y = Math.Min(p1.Y, p2.Y);
-        int w = Math.Abs(p2.X - p1.X);
-        int h = Math.Abs(p2.Y - p1.Y);
-
-        _chatArea = new Rectangle(x, y, w, h);
     }
 
     // ====== 캡쳐 + OCR ======
-    // 실제 화면을 잘라서 OCR에 넘긴다
-    static Bitmap CaptureRegion(Rectangle region)
+    static Bitmap CaptureRegion(Rectangle region, bool withDelay = true)
     {
         Bitmap bmp = new Bitmap(region.Width, region.Height);
         using (Graphics g = Graphics.FromImage(bmp))
         {
-            // 너무 빨리 캡쳐하면 카드가 안 뜬 상태일 수 있으니 약간 지연
-            Thread.Sleep(1500);
+            if (withDelay)
+                Thread.Sleep(3000); // 카드 뜰 시간
+
             g.CopyFromScreen(region.Location, Point.Empty, region.Size);
         }
-
         return bmp;
+    }
+
+    static bool IsAmbiguous(string rawText, float confidence, RunMode mode)
+    {
+        if (confidence < 50f) return true;
+
+        ReinforceResult result = GetReinforceResult(rawText);
+
+        if (result == ReinforceResult.Unknown) return true;
+
+        if (result == ReinforceResult.Success)
+        {
+            if (!TryParseSuccessInfo(rawText, out int level, out string itemName))
+                return true;
+        }
+
+        return false;
     }
 
     static string OcrBitmap(Bitmap bmp, TesseractEngine engine, out float confidence)
     {
-        // Tesseract가 읽기 쉬운 흑백 이미지로 변환
         using (var processed = new Bitmap(bmp.Width, bmp.Height))
         {
             for (int y = 0; y < bmp.Height; y++)
@@ -224,8 +257,6 @@ class Program
                 {
                     Color c = bmp.GetPixel(x, y);
                     int luminance = (int)(c.R * 0.299 + c.G * 0.587 + c.B * 0.114);
-
-                    // 임계값으로 흑/백만 남김
                     int v = luminance < 160 ? 0 : 255;
                     processed.SetPixel(x, y, Color.FromArgb(v, v, v));
                 }
@@ -248,7 +279,6 @@ class Program
     }
 
     // ====== 문자열 전처리 ======
-    // OCR이 이상하게 읽은 글자들 보정
     static string NormalizeDigits(string s)
     {
         return s
@@ -257,13 +287,11 @@ class Program
             .Replace("O", "0");
     }
 
-    // OCR 결과에서 불필요한 문자 제거
     static string NormalizeOCR(string text)
     {
         var lines = text.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
         for (int i = 0; i < lines.Length; i++)
         {
-            // 숫자/한글/강화문자만 남기기
             string clean = Regex.Replace(lines[i], @"[^가-힣0-9\+\[\]\:\s]", "");
             clean = Regex.Replace(clean, @"\s+", " ");
             lines[i] = clean.Trim();
@@ -272,13 +300,34 @@ class Program
     }
 
     // ====== 강화 결과 구분 ======
-    // OCR에서 카드 내용을 보고 성공/유지/파괴 판단
     static ReinforceResult GetReinforceResult(string rawText)
     {
-        string norm = NormalizeDigits(NormalizeOCR(rawText));
-        string flat = Regex.Replace(norm, @"\s+", ""); // 공백 제거
+        var rawLines = rawText.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
 
-        // 유지
+        foreach (var rawLine in rawLines)
+        {
+            if (!rawLine.Contains("@"))
+                continue;
+
+            string headerNorm = NormalizeDigits(NormalizeOCR(rawLine));
+            string headerFlat = Regex.Replace(headerNorm, @"\s+", "");
+
+            if (headerFlat.Contains("검판매"))
+            {
+                Console.WriteLine("[DEBUG] 판매 카드(검 판매) 감지 → Keep 처리");
+                return ReinforceResult.Keep;
+            }
+
+            if (headerFlat.Contains("강화파괴"))
+            {
+                Console.WriteLine("[DEBUG] 강화 파괴 카드 감지 → Destroy 처리");
+                return ReinforceResult.Destroy;
+            }
+        }
+
+        string norm = NormalizeDigits(NormalizeOCR(rawText));
+        string flat = Regex.Replace(norm, @"\s+", "");
+
         if (flat.Contains("레벨이유지되었습니다") ||
             flat.Contains("레벨이유지되었습") ||
             flat.Contains("레벨이유지되었") ||
@@ -287,7 +336,6 @@ class Program
             return ReinforceResult.Keep;
         }
 
-        // 파괴
         if (Regex.IsMatch(flat, "파.?괴되.?었") ||
             Regex.IsMatch(flat, "파.?괴되었습") ||
             flat.Contains("소멸되었습니다") ||
@@ -297,13 +345,11 @@ class Program
             return ReinforceResult.Destroy;
         }
 
-        // 성공 → “획득” + “+숫자” 조합이면 성공으로 본다
         bool hasAcquire = Regex.IsMatch(flat, "획.?득");
         bool hasPlusNum = Regex.IsMatch(flat, @"\+\d+");
         if (hasAcquire && hasPlusNum)
             return ReinforceResult.Success;
 
-        // 그 외엔 몰?루
         return ReinforceResult.Unknown;
     }
 
@@ -316,7 +362,6 @@ class Program
         string normAll = NormalizeDigits(NormalizeOCR(rawText));
         var lines = normAll.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
 
-        // 가장 아래줄부터 “획득” 포함된 줄 탐색
         for (int i = lines.Length - 1; i >= 0; i--)
         {
             string line = lines[i];
@@ -325,16 +370,11 @@ class Program
             if (!Regex.IsMatch(flatLine, "획.?득"))
                 continue;
 
-            // “획득 검:” 같은 앞부분은 버림
             string norm = Regex.Replace(line, @"^.*획\s*득\s*검\s*[:\s]*", "");
 
-            // “[+n] 이름” 패턴이 제일 정확함
             Match m = Regex.Match(norm, @"\[\s*\+(\d+)\s*\]\s+(.+)");
             if (!m.Success)
-            {
-                // 가끔 “[ ]” 빠진 "+n 이름" 패턴도 있다
                 m = Regex.Match(norm, @"\+(\d+)\s+(.+)");
-            }
 
             if (!m.Success)
                 continue;
@@ -365,15 +405,12 @@ class Program
         ReinforceResult result = GetReinforceResult(rawText);
         Console.WriteLine($"[DEBUG] ResultType = {result}");
 
-        // 파괴/유지는 무조건 강화
         if (result == ReinforceResult.Destroy || result == ReinforceResult.Keep)
             return false;
 
-        // 성공 아니면 일단 강화
         if (result != ReinforceResult.Success)
             return false;
 
-        // 성공인데 아이템 파싱 실패하면 강화
         if (!TryParseSuccessInfo(rawText, out int level, out string itemName))
         {
             Console.WriteLine("[DEBUG] 성공이긴 한데 파싱 실패 → 강화로");
@@ -385,18 +422,12 @@ class Program
         Console.WriteLine($"[DEBUG] 레벨={level}, 아이템=\"{itemName}\", 무기여부={isMainWeapon}");
 
         if (isMainWeapon)
-        {
-            // 검/몽둥이는 1강 이상이면 판매
             return level >= 1;
-        }
         else
-        {
-            // 나머지 아이템은 11강부터 판매
             return level >= 11;
-        }
     }
 
-    // ====== 도전모드: 목표 레벨 달성 여부 ======
+    // ====== 도전 모드 목표 달성 ======
     static bool IsTargetLevelReached(string rawText)
     {
         ReinforceResult result = GetReinforceResult(rawText);
@@ -412,19 +443,13 @@ class Program
         }
 
         Console.WriteLine($"[DEBUG] 현재 레벨 = {level}, 아이템 = \"{itemName}\"");
-
         return level >= TargetLevel;
     }
 
     // ====== 카톡 입력 ======
-    // 입력 시작 전에 딜레이를 줘야 카드 뜨기 전에 입력이 들어가는 버그를 예방함
     static void SendChatLikeHuman(string msg)
     {
-        // 입력을 너무 빨리 시작하면 OCR이 이전 카드 읽는 문제 있어서 지연
-        Thread.Sleep(1200);
-
         SendKeys.SendWait(msg);
-        Thread.Sleep(300); // 사람처럼 약간 멈춤
         SendKeys.SendWait("{ENTER}");
     }
 }
