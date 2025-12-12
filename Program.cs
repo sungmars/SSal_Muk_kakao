@@ -101,7 +101,28 @@ class Program
                         Console.WriteLine(rawText);
                         Console.WriteLine("====================");
                         Console.WriteLine($"신뢰도: {conf:F1}% (시도 {attempt + 1}/2)\n");
+                        
+                        if (IsGoldLack(rawText))
+                        {
+                            Console.WriteLine("[INFO] 골드 부족 카드 감지");
 
+                            if (mode == RunMode.SsalMuk)
+                            {
+                                // 쌀먹 모드 → 자동 판매
+                                Console.WriteLine("[MODE] 쌀먹 → 골드 부족이므로 판매 명령 전송");
+                                SendChatLikeHuman(SellText);
+                            }
+                            else // RunMode.Challenge20
+                            {
+                                // 도전 모드 → 프로그램 종료
+                                Console.WriteLine("[MODE] 도전모드 → 골드 부족, 프로그램 종료");
+                                exitProgram = true;
+                            }
+
+                            handledThisTurn = true;
+                            break;   // 이번 attempt 루프 종료
+                        }
+                        
                         if (IsAmbiguous(rawText, conf, mode))
                         {
                             Console.WriteLine("[INFO] 인식이 애매함 → 재캡쳐 시도");
@@ -492,5 +513,21 @@ class Program
     {
         SendKeys.SendWait(msg);
         SendKeys.SendWait("{ENTER}");
+    }
+    static bool IsGoldLack(string rawText)
+    {
+        // 기존 전처리 재사용
+        string norm = NormalizeDigits(NormalizeOCR(rawText));
+        string flat = Regex.Replace(norm, @"\s+", ""); // 공백 제거
+
+        // 기본 대사: "골드가 부족해. 골드를 더 모으고 오시게나."
+        // OCR 때문에 공백/마침표가 섞일 수 있어 느슨하게 체크
+        if (flat.Contains("골드가부족") || flat.Contains("골드부족"))
+            return true;
+
+        // 혹시 다른 패턴도 쓰고 싶으면 아래에 추가하면 됨
+        // if (flat.Contains("필요골드") && flat.Contains("남은골드")) ...
+
+        return false;
     }
 }
