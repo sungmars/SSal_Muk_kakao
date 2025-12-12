@@ -25,6 +25,9 @@ class Program
 
     struct POINT { public int X; public int Y; }
 
+    static int recaptureFailCount = 0;
+    static int captureOffsetDir = -1; // -1=왼쪽, +1=오른쪽
+
     enum ReinforceResult
     {
         Unknown,
@@ -108,6 +111,28 @@ class Program
                             {
                                 Console.WriteLine("[WARN] 두 번 모두 인식 불확실 → 이번 턴은 명령어 전송 안 함");
                                 handledThisTurn = true;
+
+                                // === 캡처 위치 자동 미세 조정 ===
+                                recaptureFailCount++;
+
+                                if (recaptureFailCount >= 2)
+                                {
+                                    //// 캡처 범위 1픽셀 이동
+                                    //_chatArea.X += captureOffsetDir * 1;
+
+                                    //Console.WriteLine($"[INFO] 캡쳐 위치 이동: X={_chatArea.X} (dir={captureOffsetDir})");
+
+                                    //// 방향 반전 처리
+                                    //captureOffsetDir *= -2;
+
+                                    // 실패 카운트 초기화
+                                    recaptureFailCount = 0;
+                                    //using (Bitmap test = CaptureRegion(_chatArea, withDelay: false))
+                                    //{
+                                    //    test.Save("debug_capture.png", System.Drawing.Imaging.ImageFormat.Png);
+                                    //    Console.WriteLine("debug_capture.png 로 캡쳐 저장됨");
+                                    //}
+                                }
                                 break;
                             }
                         }
@@ -208,12 +233,12 @@ class Program
                 Environment.Exit(0);
             }
         }
-        using (Bitmap test = CaptureRegion(_chatArea, withDelay: false))
-        {
-            test.Save("debug_capture.png", System.Drawing.Imaging.ImageFormat.Png);
-            Console.WriteLine("debug_capture.png 로 캡쳐 저장됨");
-            Console.ReadKey();
-        }
+        //using (Bitmap test = CaptureRegion(_chatArea, withDelay: false))
+        //{
+        //    test.Save("debug_capture.png", System.Drawing.Imaging.ImageFormat.Png);
+        //    Console.WriteLine("debug_capture.png 로 캡쳐 저장됨");
+        //    Console.ReadKey();
+        //}
     }
 
     // ====== 캡쳐 + OCR ======
@@ -249,31 +274,44 @@ class Program
 
     static string OcrBitmap(Bitmap bmp, TesseractEngine engine, out float confidence)
     {
-        using (var processed = new Bitmap(bmp.Width, bmp.Height))
+        //using (var processed = new Bitmap(bmp.Width, bmp.Height))
+        //{
+        //    for (int y = 0; y < bmp.Height; y++)
+        //    {
+        //        for (int x = 0; x < bmp.Width; x++)
+        //        {
+        //            Color c = bmp.GetPixel(x, y);
+        //            int luminance = (int)(c.R * 0.299 + c.G * 0.587 + c.B * 0.114);
+        //            int v = luminance < 160 ? 0 : 255;
+        //            processed.SetPixel(x, y, Color.FromArgb(v, v, v));
+        //        }
+        //    }
+
+        //    using (var ms = new MemoryStream())
+        //    {
+        //        processed.Save(ms, System.Drawing.Imaging.ImageFormat.Png);
+        //        byte[] data = ms.ToArray();
+
+        //        using (var pix = Pix.LoadFromMemory(data))
+        //        using (var page = engine.Process(pix))
+        //        {
+        //            string text = page.GetText();
+        //            confidence = page.GetMeanConfidence() * 100;
+        //            return text;
+        //        }
+        //    }
+        //}
+        using (var ms = new MemoryStream())
         {
-            for (int y = 0; y < bmp.Height; y++)
-            {
-                for (int x = 0; x < bmp.Width; x++)
-                {
-                    Color c = bmp.GetPixel(x, y);
-                    int luminance = (int)(c.R * 0.299 + c.G * 0.587 + c.B * 0.114);
-                    int v = luminance < 160 ? 0 : 255;
-                    processed.SetPixel(x, y, Color.FromArgb(v, v, v));
-                }
-            }
+            bmp.Save(ms, System.Drawing.Imaging.ImageFormat.Png);
+            ms.Position = 0;
 
-            using (var ms = new MemoryStream())
+            using (var pix = Pix.LoadFromMemory(ms.ToArray()))
+            using (var page = engine.Process(pix))
             {
-                processed.Save(ms, System.Drawing.Imaging.ImageFormat.Png);
-                byte[] data = ms.ToArray();
-
-                using (var pix = Pix.LoadFromMemory(data))
-                using (var page = engine.Process(pix))
-                {
-                    string text = page.GetText();
-                    confidence = page.GetMeanConfidence() * 100;
-                    return text;
-                }
+                string text = page.GetText();
+                confidence = page.GetMeanConfidence() * 100;
+                return text;
             }
         }
     }
@@ -396,7 +434,10 @@ class Program
             return false;
 
         string flat = Regex.Replace(itemName, @"\s+", "");
-        return flat.Contains("검") || flat.Contains("몽둥이");
+        return flat.Contains("검") || flat.Contains("몽둥이") || flat.Contains("교향곡") 
+            || flat.Contains("선율") || flat.Contains("막대기") || flat.Contains("맹아") 
+            || flat.Contains("앙심") || flat.Contains("갈증") || flat.Contains("복수")
+            || flat.Contains("망아");
     }
 
     // ====== 쌀먹 모드 판매/강화 결정 ======
