@@ -20,7 +20,7 @@ class Program
 
     static int targetLevelSsalMuk = 15;   // 쌀먹 모드 기본값 (아무 의미 없음, 사용자 입력으로 바뀜)
     static int targetLevelChallenge = 20; // 도전 모드 기본값
-
+    const int SellLevelMainWeapon = 1;   // 검/몽둥이 계열
 
     [DllImport("user32.dll")]
     static extern bool GetCursorPos(out POINT lpPoint);
@@ -32,6 +32,9 @@ class Program
 
     static int recaptureFailCount = 0;
     static int captureOffsetDir = -1; // -1=왼쪽, +1=오른쪽
+
+    static bool isPaused = false;
+
 
     enum ReinforceResult
     {
@@ -100,12 +103,40 @@ class Program
 
             while (!exitProgram)
             {
-                if (Console.KeyAvailable && Console.ReadKey(true).Key == ConsoleKey.Escape)
+                // === 키 입력 처리 (ESC / 0) ===
+                if (Console.KeyAvailable)
                 {
-                    Console.WriteLine("ESC 입력 → 종료.");
-                    break;
-                }
+                    var key = Console.ReadKey(true).Key;
 
+                    if (key == ConsoleKey.Escape)
+                    {
+                        Console.WriteLine("ESC 입력 → 종료.");
+                        break;
+                    }
+
+                    if (key == ConsoleKey.D0 || key == ConsoleKey.NumPad0)
+                    {
+                        isPaused = true;
+                        Console.WriteLine();
+                        Console.WriteLine("===== 실행 일시정지 (0 입력) =====");
+                        Console.WriteLine("아무 키나 누르면 재시작합니다...");
+                        Console.WriteLine();
+
+                        // 일시정지 루프
+                        while (isPaused)
+                        {
+                            if (Console.KeyAvailable)
+                            {
+                                Console.ReadKey(true); // 입력 버퍼 비우기
+                                isPaused = false;
+                                Console.WriteLine("===== 실행 재개 =====");
+                                Console.WriteLine();
+                                break;
+                            }
+                            Thread.Sleep(100);
+                        }
+                    }
+                }
                 bool handledThisTurn = false;
 
                 for (int attempt = 0; attempt < 2; attempt++)
@@ -121,7 +152,7 @@ class Program
                         Console.WriteLine(rawText);
                         Console.WriteLine("====================");
                         Console.WriteLine($"신뢰도: {conf:F1}% (시도 {attempt + 1}/2)\n");
-                        
+
                         if (IsGoldLack(rawText))
                         {
                             Console.WriteLine("[INFO] 골드 부족 카드 감지");
@@ -142,7 +173,7 @@ class Program
                             handledThisTurn = true;
                             break;   // 이번 attempt 루프 종료
                         }
-                        
+
                         if (IsAmbiguous(rawText, conf, mode))
                         {
                             Console.WriteLine("[INFO] 인식이 애매함 → 재캡쳐 시도");
@@ -167,12 +198,12 @@ class Program
 
                                     //// 방향 반전 처리
                                     //captureOffsetDir *= -2;
-                                    
+
                                     //캡쳐범위 다시
                                     CalibrateChatArea();
                                     Console.WriteLine();
                                     Console.WriteLine($"새 캡쳐 영역: X={_chatArea.X}, Y={_chatArea.Y}, W={_chatArea.Width}, H={_chatArea.Height}");
-                                    
+
                                     // 실패 카운트 초기화
                                     recaptureFailCount = 0;
                                     //using (Bitmap test = CaptureRegion(_chatArea, withDelay: false))
@@ -223,362 +254,344 @@ class Program
                     Console.WriteLine("[INFO] 이번 턴은 처리하지 않음 (모든 시도 애매)");
 
                 Thread.Sleep(300);
+
             }
         }
-    }
 
-    // ====== 모드 선택 ======
-    static RunMode SelectRunMode()
-    {
-        while (true)
+        // ====== 모드 선택 ======
+        static RunMode SelectRunMode()
         {
-            Console.Clear();
-            Console.WriteLine("============== 카톡 자동 강화 프로그램 ==============");
-            Console.WriteLine();
-            Console.WriteLine("모드를 선택하세요.");
-            Console.WriteLine();
-            Console.WriteLine("  1. 쌀먹 모드");
-            Console.WriteLine("     - 검/몽둥이면 1강 이상이면 판매");
-            Console.WriteLine("     - 기타 아이템은 11강 이상이면 판매");
-            Console.WriteLine();
-            Console.WriteLine("  2. 도전 모드");
-            Console.WriteLine("     - 아이템 종류 상관없이");
-            Console.WriteLine("       목표 강화(+20 등) 찍을 때까지 무한 강화");
-            Console.WriteLine();
-            Console.WriteLine("=====================================================");
-            Console.Write("번호 입력 (1 또는 2): ");
-
-            string input = Console.ReadLine().Trim();
-
-            if (input == "1") return RunMode.SsalMuk;
-            if (input == "2") return RunMode.Challenge20;
-
-            Console.WriteLine("\n잘못 입력함. 다시 입력해라 (1 또는 2).");
-            Thread.Sleep(1000);
-        }
-    }
-
-    // ====== 캘리브레이션 (드래그로 선택) ======
-    static void CalibrateChatArea()
-    {
-        Console.WriteLine("===== 캡쳐 영역 설정 =====");
-        Console.WriteLine("마우스로 화면을 드래그해서 '카톡 카드가 나오는 영역'을 감싸서 선택하세요.");
-        Console.WriteLine("선택 중 ESC를 누르면 취소됩니다.\n");
-
-        using (var selForm = new CaptureSelectionForm())
-        {
-            var result = selForm.ShowDialog();
-
-            if (result == DialogResult.OK && !selForm.SelectedRectScreen.IsEmpty)
+            while (true)
             {
-                _chatArea = selForm.SelectedRectScreen;
-                Console.WriteLine($"선택된 캡쳐 영역: X={_chatArea.X}, Y={_chatArea.Y}, W={_chatArea.Width}, H={_chatArea.Height}");
-            }
-            else
-            {
-                Console.WriteLine("영역 선택이 취소되었거나 잘못되었습니다. 프로그램을 종료합니다.");
+                Console.Clear();
+                Console.WriteLine("============== 플레이봇 자동 강화 프로그램 ==============");
+                Console.WriteLine();
+                Console.WriteLine("모드를 선택하세요.");
+                Console.WriteLine();
+                Console.WriteLine("  1. 쌀먹 모드");
+                Console.WriteLine("     - 일반무기는 1강 이상이면 판매");
+                Console.WriteLine("     - 기타 아이템은 목표강화수치 이상이면 판매");
+                Console.WriteLine();
+                Console.WriteLine("  2. 도전 모드");
+                Console.WriteLine("     - 아이템 종류 상관없이");
+                Console.WriteLine("       목표 강화 찍을 때까지 무한 강화");
+                Console.WriteLine();
+                Console.WriteLine("=====================================================");
+                Console.Write("번호 입력 (1 또는 2): ");
+
+                string input = Console.ReadLine().Trim();
+
+                if (input == "1") return RunMode.SsalMuk;
+                if (input == "2") return RunMode.Challenge20;
+
+                Console.WriteLine("\n잘못 입력함. 다시 입력 (1 또는 2).");
                 Thread.Sleep(1000);
-                Environment.Exit(0);
             }
         }
-        //using (Bitmap test = CaptureRegion(_chatArea, withDelay: false))
-        //{
-        //    test.Save("debug_capture.png", System.Drawing.Imaging.ImageFormat.Png);
-        //    Console.WriteLine("debug_capture.png 로 캡쳐 저장됨");
-        //    Console.ReadKey();
-        //}
-    }
 
-    // ====== 캡쳐 + OCR ======
-    static Bitmap CaptureRegion(Rectangle region, bool withDelay = true)
-    {
-        Bitmap bmp = new Bitmap(region.Width, region.Height);
-        using (Graphics g = Graphics.FromImage(bmp))
+        // ====== 캘리브레이션 (드래그로 선택) ======
+        static void CalibrateChatArea()
         {
-            if (withDelay)
-                Thread.Sleep(3000); // 카드 뜰 시간
+            Console.WriteLine("===== 캡쳐 영역 설정 =====");
+            Console.WriteLine("마우스로 화면을 드래그해서 '채팅봇 말풍선'을 감싸서 선택하세요.");
+            Console.WriteLine("선택 중 ESC를 누르면 취소됩니다.\n");
 
-            g.CopyFromScreen(region.Location, Point.Empty, region.Size);
-        }
-        return bmp;
-    }
-
-    static bool IsAmbiguous(string rawText, float confidence, RunMode mode)
-    {
-        if (confidence < 50f) return true;
-
-        ReinforceResult result = GetReinforceResult(rawText);
-
-        if (result == ReinforceResult.Unknown) return true;
-
-        if (result == ReinforceResult.Success)
-        {
-            if (!TryParseSuccessInfo(rawText, out int level, out string itemName))
-                return true;
-        }
-
-        return false;
-    }
-
-    static string OcrBitmap(Bitmap bmp, TesseractEngine engine, out float confidence)
-    {
-        //using (var processed = new Bitmap(bmp.Width, bmp.Height))
-        //{
-        //    for (int y = 0; y < bmp.Height; y++)
-        //    {
-        //        for (int x = 0; x < bmp.Width; x++)
-        //        {
-        //            Color c = bmp.GetPixel(x, y);
-        //            int luminance = (int)(c.R * 0.299 + c.G * 0.587 + c.B * 0.114);
-        //            int v = luminance < 160 ? 0 : 255;
-        //            processed.SetPixel(x, y, Color.FromArgb(v, v, v));
-        //        }
-        //    }
-
-        //    using (var ms = new MemoryStream())
-        //    {
-        //        processed.Save(ms, System.Drawing.Imaging.ImageFormat.Png);
-        //        byte[] data = ms.ToArray();
-
-        //        using (var pix = Pix.LoadFromMemory(data))
-        //        using (var page = engine.Process(pix))
-        //        {
-        //            string text = page.GetText();
-        //            confidence = page.GetMeanConfidence() * 100;
-        //            return text;
-        //        }
-        //    }
-        //}
-        using (var ms = new MemoryStream())
-        {
-            bmp.Save(ms, System.Drawing.Imaging.ImageFormat.Png);
-            ms.Position = 0;
-
-            using (var pix = Pix.LoadFromMemory(ms.ToArray()))
-            using (var page = engine.Process(pix))
+            using (var selForm = new CaptureSelectionForm())
             {
-                string text = page.GetText();
-                confidence = page.GetMeanConfidence() * 100;
-                return text;
+                var result = selForm.ShowDialog();
+
+                if (result == DialogResult.OK && !selForm.SelectedRectScreen.IsEmpty)
+                {
+                    _chatArea = selForm.SelectedRectScreen;
+                    Console.WriteLine($"선택된 캡쳐 영역: X={_chatArea.X}, Y={_chatArea.Y}, W={_chatArea.Width}, H={_chatArea.Height}");
+                }
+                else
+                {
+                    Console.WriteLine("영역 선택이 취소되었거나 잘못되었습니다. 프로그램을 종료합니다.");
+                    Thread.Sleep(1000);
+                    Environment.Exit(0);
+                }
+            }
+            //using (Bitmap test = CaptureRegion(_chatArea, withDelay: false))
+            //{
+            //    test.Save("debug_capture.png", System.Drawing.Imaging.ImageFormat.Png);
+            //    Console.WriteLine("debug_capture.png 로 캡쳐 저장됨");
+            //    Console.ReadKey();
+            //}
+        }
+
+        // ====== 캡쳐 + OCR ======
+        static Bitmap CaptureRegion(Rectangle region, bool withDelay = true)
+        {
+            Bitmap bmp = new Bitmap(region.Width, region.Height);
+            using (Graphics g = Graphics.FromImage(bmp))
+            {
+                if (withDelay)
+                    Thread.Sleep(3000); // 카드 뜰 시간
+
+                g.CopyFromScreen(region.Location, Point.Empty, region.Size);
+            }
+            return bmp;
+        }
+
+        static bool IsAmbiguous(string rawText, float confidence, RunMode mode)
+        {
+            if (confidence < 50f) return true;
+
+            ReinforceResult result = GetReinforceResult(rawText);
+
+            if (result == ReinforceResult.Unknown) return true;
+
+            if (result == ReinforceResult.Success)
+            {
+                if (!TryParseSuccessInfo(rawText, out int level, out string itemName))
+                    return true;
+            }
+
+            return false;
+        }
+
+        static string OcrBitmap(Bitmap bmp, TesseractEngine engine, out float confidence)
+        {
+            //using (var processed = new Bitmap(bmp.Width, bmp.Height))
+            //{
+            //    for (int y = 0; y < bmp.Height; y++)
+            //    {
+            //        for (int x = 0; x < bmp.Width; x++)
+            //        {
+            //            Color c = bmp.GetPixel(x, y);
+            //            int luminance = (int)(c.R * 0.299 + c.G * 0.587 + c.B * 0.114);
+            //            int v = luminance < 160 ? 0 : 255;
+            //            processed.SetPixel(x, y, Color.FromArgb(v, v, v));
+            //        }
+            //    }
+
+            //    using (var ms = new MemoryStream())
+            //    {
+            //        processed.Save(ms, System.Drawing.Imaging.ImageFormat.Png);
+            //        byte[] data = ms.ToArray();
+
+            //        using (var pix = Pix.LoadFromMemory(data))
+            //        using (var page = engine.Process(pix))
+            //        {
+            //            string text = page.GetText();
+            //            confidence = page.GetMeanConfidence() * 100;
+            //            return text;
+            //        }
+            //    }
+            //}
+            using (var ms = new MemoryStream())
+            {
+                bmp.Save(ms, System.Drawing.Imaging.ImageFormat.Png);
+                ms.Position = 0;
+
+                using (var pix = Pix.LoadFromMemory(ms.ToArray()))
+                using (var page = engine.Process(pix))
+                {
+                    string text = page.GetText();
+                    confidence = page.GetMeanConfidence() * 100;
+                    return text;
+                }
             }
         }
-    }
 
-    // ====== 문자열 전처리 ======
-    static string NormalizeDigits(string s)
-    {
-        return s
-            .Replace("l", "1")
-            .Replace("I", "1")
-            .Replace("O", "0");
-    }
-
-    static string NormalizeOCR(string text)
-    {
-        var lines = text.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
-        for (int i = 0; i < lines.Length; i++)
+        // ====== 문자열 전처리 ======
+        static string NormalizeDigits(string s)
         {
-            string clean = Regex.Replace(lines[i], @"[^가-힣0-9\+\[\]\:\s]", "");
-            clean = Regex.Replace(clean, @"\s+", " ");
-            lines[i] = clean.Trim();
+            return s
+                .Replace("l", "1")
+                .Replace("I", "1")
+                .Replace("O", "0");
         }
-        return string.Join("\n", lines);
-    }
 
-    // ====== 강화 결과 구분 ======
-    static ReinforceResult GetReinforceResult(string rawText)
-    {
-        var rawLines = rawText.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
-
-        foreach (var rawLine in rawLines)
+        static string NormalizeOCR(string text)
         {
-            if (!rawLine.Contains("@"))
-                continue;
-
-            string headerNorm = NormalizeDigits(NormalizeOCR(rawLine));
-            string headerFlat = Regex.Replace(headerNorm, @"\s+", "");
-
-            if (headerFlat.Contains("검판매"))
+            var lines = text.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+            for (int i = 0; i < lines.Length; i++)
             {
-                Console.WriteLine("[DEBUG] 판매 카드(검 판매) 감지 → Keep 처리");
+                string clean = Regex.Replace(lines[i], @"[^가-힣0-9\+\[\]\:\s]", "");
+                clean = Regex.Replace(clean, @"\s+", " ");
+                lines[i] = clean.Trim();
+            }
+            return string.Join("\n", lines);
+        }
+
+        // ====== 강화 결과 구분 ======
+        static ReinforceResult GetReinforceResult(string rawText)
+        {
+            var rawLines = rawText.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+
+            foreach (var rawLine in rawLines)
+            {
+                if (!rawLine.Contains("@"))
+                    continue;
+
+                string headerNorm = NormalizeDigits(NormalizeOCR(rawLine));
+                string headerFlat = Regex.Replace(headerNorm, @"\s+", "");
+
+                if (headerFlat.Contains("검판매"))
+                {
+                    Console.WriteLine("[DEBUG] 판매 카드(검 판매) 감지 → Keep 처리");
+                    return ReinforceResult.Keep;
+                }
+
+                if (headerFlat.Contains("강화파괴"))
+                {
+                    Console.WriteLine("[DEBUG] 강화 파괴 카드 감지 → Destroy 처리");
+                    return ReinforceResult.Destroy;
+                }
+            }
+
+            string norm = NormalizeDigits(NormalizeOCR(rawText));
+            string flat = Regex.Replace(norm, @"\s+", "");
+
+            if (flat.Contains("레벨이유지되었습니다") ||
+                flat.Contains("레벨이유지되었습") ||
+                flat.Contains("레벨이유지되었") ||
+                Regex.IsMatch(flat, "유.?지되.?었"))
+            {
                 return ReinforceResult.Keep;
             }
 
-            if (headerFlat.Contains("강화파괴"))
+            if (Regex.IsMatch(flat, "파.?괴되.?었") ||
+                Regex.IsMatch(flat, "파.?괴되었습") ||
+                flat.Contains("소멸되었습니다") ||
+                flat.Contains("소멸되었습") ||
+                flat.Contains("부서졌"))
             {
-                Console.WriteLine("[DEBUG] 강화 파괴 카드 감지 → Destroy 처리");
                 return ReinforceResult.Destroy;
             }
+
+            bool hasAcquire = Regex.IsMatch(flat, "획.?득");
+            bool hasPlusNum = Regex.IsMatch(flat, @"\+\d+");
+            if (hasAcquire && hasPlusNum)
+                return ReinforceResult.Success;
+
+            return ReinforceResult.Unknown;
         }
 
-        string norm = NormalizeDigits(NormalizeOCR(rawText));
-        string flat = Regex.Replace(norm, @"\s+", "");
-
-        if (flat.Contains("레벨이유지되었습니다") ||
-            flat.Contains("레벨이유지되었습") ||
-            flat.Contains("레벨이유지되었") ||
-            Regex.IsMatch(flat, "유.?지되.?었"))
+        // ====== 성공 카드에서 레벨/아이템명 추출 ======
+        static bool TryParseSuccessInfo(string rawText, out int level, out string itemName)
         {
-            return ReinforceResult.Keep;
-        }
+            level = 0;
+            itemName = null;
 
-        if (Regex.IsMatch(flat, "파.?괴되.?었") ||
-            Regex.IsMatch(flat, "파.?괴되었습") ||
-            flat.Contains("소멸되었습니다") ||
-            flat.Contains("소멸되었습") ||
-            flat.Contains("부서졌"))
-        {
-            return ReinforceResult.Destroy;
-        }
+            string normAll = NormalizeDigits(NormalizeOCR(rawText));
+            var lines = normAll.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
 
-        bool hasAcquire = Regex.IsMatch(flat, "획.?득");
-        bool hasPlusNum = Regex.IsMatch(flat, @"\+\d+");
-        if (hasAcquire && hasPlusNum)
-            return ReinforceResult.Success;
+            for (int i = lines.Length - 1; i >= 0; i--)
+            {
+                string line = lines[i];
+                string flatLine = Regex.Replace(line, @"\s+", "");
 
-        return ReinforceResult.Unknown;
-    }
+                if (!Regex.IsMatch(flatLine, "획.?득"))
+                    continue;
 
-    // ====== 성공 카드에서 레벨/아이템명 추출 ======
-    static bool TryParseSuccessInfo(string rawText, out int level, out string itemName)
-    {
-        level = 0;
-        itemName = null;
+                string norm = Regex.Replace(line, @"^.*획\s*득\s*검\s*[:\s]*", "");
 
-        string normAll = NormalizeDigits(NormalizeOCR(rawText));
-        var lines = normAll.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+                Match m = Regex.Match(norm, @"\[\s*\+(\d+)\s*\]\s+(.+)");
+                if (!m.Success)
+                    m = Regex.Match(norm, @"\+(\d+)\s+(.+)");
 
-        for (int i = lines.Length - 1; i >= 0; i--)
-        {
-            string line = lines[i];
-            string flatLine = Regex.Replace(line, @"\s+", "");
+                if (!m.Success)
+                    continue;
 
-            if (!Regex.IsMatch(flatLine, "획.?득"))
-                continue;
+                if (!int.TryParse(m.Groups[1].Value, out level))
+                    continue;
 
-            string norm = Regex.Replace(line, @"^.*획\s*득\s*검\s*[:\s]*", "");
+                itemName = m.Groups[2].Value.Trim();
+                return true;
+            }
 
-            Match m = Regex.Match(norm, @"\[\s*\+(\d+)\s*\]\s+(.+)");
-            if (!m.Success)
-                m = Regex.Match(norm, @"\+(\d+)\s+(.+)");
-
-            if (!m.Success)
-                continue;
-
-            if (!int.TryParse(m.Groups[1].Value, out level))
-                continue;
-
-            itemName = m.Groups[2].Value.Trim();
-            return true;
-        }
-
-        return false;
-    }
-
-    // ====== 아이템이 검/몽둥이인지 판별 ======
-    static bool IsMainWeapon(string itemName)
-    {
-        if (string.IsNullOrWhiteSpace(itemName))
-            return false;
-
-        string flat = Regex.Replace(itemName, @"\s+", "");
-        return flat.Contains("검") || flat.Contains("몽둥이") || flat.Contains("교향곡") 
-            || flat.Contains("선율") || flat.Contains("막대기") || flat.Contains("맹아") 
-            || flat.Contains("앙심") || flat.Contains("갈증") || flat.Contains("복수")
-            || flat.Contains("망아");
-    }
-
-    // ====== 쌀먹 모드 판매/강화 결정 ======
-    static bool DecideBasedOnWholeText(string rawText)
-    {
-        ReinforceResult result = GetReinforceResult(rawText);
-        Console.WriteLine($"[DEBUG] ResultType = {result}");
-
-        if (result == ReinforceResult.Destroy || result == ReinforceResult.Keep)
-            return false;
-
-        if (result != ReinforceResult.Success)
-            return false;
-
-        if (!TryParseSuccessInfo(rawText, out int level, out string itemName))
-        {
-            Console.WriteLine("[DEBUG] 성공이긴 한데 파싱 실패 → 강화로");
             return false;
         }
 
-        // 항상 강화 예외 먼저 검사
-        if (IsAlwaysReinforceWeapon(itemName))
+        // ====== 아이템이 검/몽둥이인지 판별 ======
+        static bool IsMainWeapon(string itemName)
         {
-            Console.WriteLine($"[DEBUG] 항상 강화 대상 무기 감지 → \"{itemName}\" 는 판매하지 않음");
-            return false;   // false = 강화
+            if (string.IsNullOrWhiteSpace(itemName))
+                return false;
+
+            string flat = Regex.Replace(itemName, @"\s+", "");
+            return flat.Contains("검") || flat.Contains("몽둥이") || flat.Contains("교향곡")
+                || flat.Contains("선율") || flat.Contains("막대") || flat.Contains("맹아")
+                || flat.Contains("앙심") || flat.Contains("갈증") || flat.Contains("복수")
+                || flat.Contains("망아");
         }
 
-        bool isMainWeapon = IsMainWeapon(itemName);
-
-        Console.WriteLine($"[DEBUG] 레벨={level}, 아이템=\"{itemName}\", 무기여부={isMainWeapon}");
-
-        if (isMainWeapon)
+        // ====== 쌀먹 모드 판매/강화 결정 ======
+        static bool DecideBasedOnWholeText(string rawText)
         {
+            ReinforceResult result = GetReinforceResult(rawText);
+            if (result != ReinforceResult.Success)
+                return false;
+
+            if (!TryParseSuccessInfo(rawText, out int level, out string itemName))
+                return false;
+
+     
+            if (IsAlwaysReinforceWeapon(itemName))
+                return false;
+
+            if (IsMainWeapon(itemName))
+                return level >= 1;
+
             return level >= targetLevelSsalMuk;
         }
-        else
+
+        // ====== 도전 모드 목표 달성 ======
+        static bool IsTargetLevelReached(string rawText)
         {
-            return level >= targetLevelSsalMuk;
+            ReinforceResult result = GetReinforceResult(rawText);
+            Console.WriteLine($"[DEBUG] ResultType = {result}");
+
+            if (result != ReinforceResult.Success)
+                return false;
+
+            if (!TryParseSuccessInfo(rawText, out int level, out string itemName))
+            {
+                Console.WriteLine("[DEBUG] 성공인데 파싱 실패 → 아직 목표 X");
+                return false;
+            }
+
+            Console.WriteLine($"[DEBUG] 현재 레벨 = {level}, 아이템 = \"{itemName}\"");
+            return level >= targetLevelChallenge;
         }
-    }
 
-    // ====== 도전 모드 목표 달성 ======
-    static bool IsTargetLevelReached(string rawText)
-    {
-        ReinforceResult result = GetReinforceResult(rawText);
-        Console.WriteLine($"[DEBUG] ResultType = {result}");
-
-        if (result != ReinforceResult.Success)
-            return false;
-
-        if (!TryParseSuccessInfo(rawText, out int level, out string itemName))
+        // ====== 카톡 입력 ======
+        static void SendChatLikeHuman(string msg)
         {
-            Console.WriteLine("[DEBUG] 성공인데 파싱 실패 → 아직 목표 X");
+            SendKeys.SendWait(msg);
+            SendKeys.SendWait("{ENTER}");
+        }
+        static bool IsGoldLack(string rawText)
+        {
+            // 기존 전처리 재사용
+            string norm = NormalizeDigits(NormalizeOCR(rawText));
+            string flat = Regex.Replace(norm, @"\s+", ""); // 공백 제거
+
+            // 기본 대사: "골드가 부족해. 골드를 더 모으고 오시게나."
+            // OCR 때문에 공백/마침표가 섞일 수 있어 느슨하게 체크
+            if (flat.Contains("골드가부족") || flat.Contains("골드부족"))
+                return true;
+
+            // 혹시 다른 패턴도 쓰고 싶으면 아래에 추가하면 됨
+            // if (flat.Contains("필요골드") && flat.Contains("남은골드")) ...
+
             return false;
         }
+        static bool IsAlwaysReinforceWeapon(string itemName)
+        {
+            if (string.IsNullOrWhiteSpace(itemName))
+                return false;
 
-        Console.WriteLine($"[DEBUG] 현재 레벨 = {level}, 아이템 = \"{itemName}\"");
-        return level >= targetLevelChallenge;
-    }
+            string flat = Regex.Replace(itemName, @"\s+", "");
 
-    // ====== 카톡 입력 ======
-    static void SendChatLikeHuman(string msg)
-    {
-        SendKeys.SendWait(msg);
-        SendKeys.SendWait("{ENTER}");
-    }
-    static bool IsGoldLack(string rawText)
-    {
-        // 기존 전처리 재사용
-        string norm = NormalizeDigits(NormalizeOCR(rawText));
-        string flat = Regex.Replace(norm, @"\s+", ""); // 공백 제거
+            // 이름에 '광선검' 또는 '단검'이 포함되면 항상 강화
+            if (flat.Contains("광선검") || flat.Contains("단검"))
+                return true;
 
-        // 기본 대사: "골드가 부족해. 골드를 더 모으고 오시게나."
-        // OCR 때문에 공백/마침표가 섞일 수 있어 느슨하게 체크
-        if (flat.Contains("골드가부족") || flat.Contains("골드부족"))
-            return true;
-
-        // 혹시 다른 패턴도 쓰고 싶으면 아래에 추가하면 됨
-        // if (flat.Contains("필요골드") && flat.Contains("남은골드")) ...
-
-        return false;
-    }
-    static bool IsAlwaysReinforceWeapon(string itemName)
-    {
-        if (string.IsNullOrWhiteSpace(itemName))
             return false;
-
-        string flat = Regex.Replace(itemName, @"\s+", "");
-
-        // 이름에 '광선검' 또는 '단검'이 포함되면 항상 강화
-        if (flat.Contains("광선검") || flat.Contains("단검"))
-            return true;
-
-        return false;
+        }
     }
 }
